@@ -160,11 +160,27 @@ def objectify_tree_string(tree_string):
             temp += c
     return previously_finished_parent
 
-        
+def get_leaves(root):
+    leaf_nodes = []
     
-trees = build_structure("C:\\Users\\nmale\\chromedriver_win32\\chromedriver.exe")
-export_trees(trees, "area_trees.txt")
-read_trees = import_trees("area_trees.txt")
+    remaining_nodes = []
+    remaining_nodes.append(root)
+    
+    while remaining_nodes:
+        current_node = remaining_nodes.pop()
+        
+        if not current_node.get_children():
+            leaf_nodes.append(current_node)
+        else:
+            children = current_node.get_children()
+            for child in children:
+                remaining_nodes.append(child)
+    
+    return leaf_nodes
+    
+#trees = build_structure("C:\\Users\\nmale\\chromedriver_win32\\chromedriver.exe")
+#export_trees(trees, "area_trees.txt")
+#read_trees = import_trees("area_trees.txt")
 
 
                 
