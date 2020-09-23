@@ -160,6 +160,8 @@ def objectify_tree_string(tree_string):
             temp += c
     return previously_finished_parent
 
+
+#return a list of all leaf nodes given a root
 def get_leaves(root):
     leaf_nodes = []
     
