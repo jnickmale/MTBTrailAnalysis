@@ -27,18 +27,20 @@ def scrape_trails():
         
         num_trails_state = 0
         specific_areas = ahb.get_leaves(tree)
+        #scrape each leaf-level area
         for area in specific_areas:
             leaf_area = {}
             leaf_area_url = area.data[0]
             leaf_area_id = us_state + "/" + area.data[1]
+            leaf_area_unique_id = leaf_area_id + "\\" + leaf_area_url.split("directory/")[1].split("/")[0]
             
             trails_in_area = []
-            areas_in_state.append(leaf_area_id)
+            areas_in_state.append(leaf_area_unique_id)
             
             #make an http request and open the response with beautiful soup
             area_page = get(leaf_area_url)
             area_html = area_page.text
-            area_soup = BeautifulSoup(area_html)
+            area_soup = BeautifulSoup(area_html, features="lxml")
             
             table = area_soup.find("table", class_="trail-table")
             print(table)
@@ -64,13 +66,15 @@ def scrape_trails():
             #scrape each individual trail
             if not only_one:
                 for trail_meta in trail_info:
-                    scrape_trail(trail_meta["data-href"], leaf_area_id, trails_in_area, db)
+                    scrape_trail(trail_meta["data-href"], leaf_area_id, leaf_area_unique_id, trails_in_area, db)
             elif len(trail_info) > 0:
-                scrape_trail(trail_info[0], leaf_area_id, trails_in_area, db)
+                scrape_trail(trail_info[0], leaf_area_id, leaf_area_unique_id, trails_in_area, db)
             
                 
             leaf_area["url"] = leaf_area_url
             leaf_area["id"] = leaf_area_id
+            leaf_area["state"] = us_state
+            leaf_area["unique_id"] = leaf_area_unique_id
             leaf_area["num_trails"] = leaf_area_num_trails
             leaf_area["trails"] = trails_in_area
             db.leaf_areas.insert_one(leaf_area)
@@ -87,87 +91,93 @@ def scrape_trails():
         
         print("\n" + tree.data[1] + " completed" + "\n")
 
-def scrape_trail(trail_url, area_id, trails_in_area, db):
+#scrape a single trail page given a url and addthe data to the database
+def scrape_trail(trail_url, area_id, area_unique_id, trails_in_area, db):
     trail = {}
     
-    trail_soup = BeautifulSoup(get(trail_url).text)
+    page = get(trail_url)
     
-    trail_name = trail_soup.find("h1", id="trail-title").text.strip()
-    trail_id = area_id + "/" + trail_name
-    
-    trails_in_area.append(trail_id)
-    
-    #extract the "shorter" trail description
-    trail_meta_description = trail_soup.find("meta", attrs={"name":"description"})['content']
-    
-    #extract the trail feature types and trail description from the html
-    trail_text = trail_soup.find(id="trail-text")
-    trail_text_span = trail_text.span
-    trail_text_span_sections = trail_text_span.find_all("div", class_="mb-1")
-    try:
-        trail_features = trail_text_span_sections[1].find_all("h3")[2].find("span").text
-    except:
-        trail_features = "unlisted"
-    
-    try:
-        trail_description = trail_text_span_sections[2].text.strip()
-    except:
-        trail_description = "unlisted"
-    try:
-        trail_voted_difficulty = trail_soup.find("span", class_="difficulty-text").text.strip()
-    except:
-        trail_voted_difficulty = "unlisted"
-    try:
-        stars_pictures_el = trail_soup.find("span", class_="scoreStars")
-        trail_star_score = stars_pictures_el.find_next_sibling("span").text.strip().split()[0]
-    except:
-        trail_star_score = "unlisted"
-    
-    print(trail_text_span_sections)
-    
-    #scrape the altitude data and other features here
-    scraped_javascript = trail_soup.find_all(string=re.compile("rawProfileData = \[(\[.*\],?)*\]"))[0]
-    scraped_altitude_data_javascript = re.search(re.compile("rawProfileData = \[(\[.*\],?)*\]"), scraped_javascript)[0]
-    scraped_altitude_data_python = scraped_altitude_data_javascript.replace("rawProfileData", "globals()[\"raw_profile_data\"]", 1)
-    
-    #take advantage of the fact that javascript arrays follow the same format as python lists. Run the code extracted from the javascript
-    #the code executed will have the following form: raw_profile_data = [[],[],...]
-    #thus we will now have a list of nested lists containing altitude data called raw_profile_data
-    exec(scraped_altitude_data_python)
-    trail_altitude_feet = []
-    trail_incline_grade = []
-    trail_mile_mark = []
-    #keep the two unknown feature values in case we later discover that they are useful
-    trail_unk1 = []
-    trail_unk2 = []
-    
-    #break list of data points into lists of individual features
-    #raw_profile_data comes from the executed code from exec above
-    for tup in globals()["raw_profile_data"]:
-        trail_altitude_feet.append(tup[0])
-        trail_incline_grade.append(tup[1])
-        trail_mile_mark.append(tup[2])
-        trail_unk1.append(tup[3])
-        trail_unk2.append(tup[4])
-    
-    
-    trail["area"] = area_id
-    trail["name"] = trail_name
-    trail["id"] = trail_id
-    trail["url"] = trail_url
-    trail["meta-description"] = trail_meta_description
-    trail["features"] = trail_features
-    trail["description"] = trail_description
-    trail["voted_difficulty"] = trail_voted_difficulty
-    trail["star_score"] = trail_star_score
-    
-    trail["altitude_feet"] = trail_altitude_feet
-    trail["incline_grade"] = trail_incline_grade
-    trail["mile_mark"] = trail_mile_mark
-    trail["unk1"] = trail_unk1
-    trail["unk2"] = trail_unk2
-    
-    db.trails.insert_one(trail)
+    if not page.status_code == 404:
+        trail_soup = BeautifulSoup(get(trail_url).text, features="lxml")
+        
+        trail_name = trail_soup.find("h1", id="trail-title").text.strip()
+        trail_id = area_id + "/" + trail_name
+        trail_unique_id = area_unique_id + "/" + "trail_name" + "\\" + trail_url.split("trail/")[1].split("/")[0]
+        
+        trails_in_area.append(trail_unique_id)
+        
+        #extract the "shorter" trail description
+        trail_meta_description = trail_soup.find("meta", attrs={"name":"description"})['content']
+        
+        #extract the trail feature types and trail description from the html
+        trail_text = trail_soup.find(id="trail-text")
+        trail_text_span = trail_text.span
+        trail_text_span_sections = trail_text_span.find_all("div", class_="mb-1")
+        try:
+            trail_features = trail_text_span_sections[1].find_all("h3")[2].find("span").text.strip().split(" · ")
+        except:
+            trail_features = ["unlisted"]
+        
+        try:
+            trail_description = trail_text_span_sections[2].text.strip()
+        except:
+            trail_description = "unlisted"
+        try:
+            trail_voted_difficulty = trail_soup.find("span", class_="difficulty-text").text.strip()
+        except:
+            trail_voted_difficulty = "unlisted"
+        try:
+            stars_pictures_el = trail_soup.find("span", class_="scoreStars")
+            trail_star_score = stars_pictures_el.find_next_sibling("span").text.strip().split()[0]
+        except:
+            trail_star_score = "unlisted"
+        
+        print(trail_text_span_sections)
+        
+        #scrape the altitude data and other features here
+        scraped_javascript = trail_soup.find_all(string=re.compile("rawProfileData = \[(\[.*\],?)*\]"))[0]
+        scraped_altitude_data_javascript = re.search(re.compile("rawProfileData = \[(\[.*\],?)*\]"), scraped_javascript)[0]
+        scraped_altitude_data_python = scraped_altitude_data_javascript.replace("rawProfileData", "globals()[\"raw_profile_data\"]", 1)
+        
+        #take advantage of the fact that javascript arrays follow the same format as python lists. Run the code extracted from the javascript
+        #the code executed will have the following form: raw_profile_data = [[],[],...]
+        #thus we will now have a list of nested lists containing altitude data called raw_profile_data
+        exec(scraped_altitude_data_python)
+        trail_altitude_feet = []
+        trail_incline_grade = []
+        trail_mile_mark = []
+        #keep the two unknown feature values in case we later discover that they are useful
+        trail_unk1 = []
+        trail_unk2 = []
+        
+        #break list of data points into lists of individual features
+        #raw_profile_data comes from the executed code from exec above
+        for tup in globals()["raw_profile_data"]:
+            trail_altitude_feet.append(tup[0])
+            trail_incline_grade.append(tup[1])
+            trail_mile_mark.append(tup[2])
+            trail_unk1.append(tup[3])
+            trail_unk2.append(tup[4])
+        
+        trail["state"] = area_unique_id.split("/")[0]
+        trail["area"] = area_unique_id
+        trail["name"] = trail_name
+        trail["id"] = trail_id
+        trail["unique_id"] = trail_unique_id
+        trail["url"] = trail_url
+        trail["meta-description"] = trail_meta_description
+        trail["features"] = trail_features
+        trail["description"] = trail_description
+        trail["voted_difficulty"] = trail_voted_difficulty
+        trail["star_score"] = trail_star_score
+        
+        trail["altitude_feet"] = trail_altitude_feet
+        trail["incline_grade"] = trail_incline_grade
+        trail["mile_mark"] = trail_mile_mark
+        trail["unk1"] = trail_unk1
+        trail["unk2"] = trail_unk2
+        
+        db.trails.insert_one(trail)
 
 scrape_trails()
 
