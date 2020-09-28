@@ -95,8 +95,11 @@ def scrape_trails():
 #scrape a single trail page given a url and addthe data to the database
 def scrape_trail(trail_url, area_id, area_unique_id, trails_in_area, db):
     trail = {}
-    time.sleep(.3)
-    page = get(trail_url)
+    try:
+        page = get(trail_url)
+    except:
+        time.sleep(5)
+        page = get(trail_url)
     
     if not page.status_code == 404:
         trail_soup = BeautifulSoup(page.text, features="lxml")
